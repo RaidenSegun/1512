@@ -1,15 +1,14 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from apps.todo.views import UserViewSet, TodoViewSet, DeleteAllTodosViewSet
+from apps.todo.views import TodoMixin, UserMixin
 
 router = DefaultRouter()
-router.register(r'users', UserViewSet)
-router.register(r'todos', TodoViewSet)
+router.register(r'todos', TodoMixin, basename="todos")
+router.register(r'users', UserMixin, basename="users")
 
 urlpatterns = [
-    path('', include(router.urls)),
-    path('delete_todos/', DeleteAllTodosViewSet.as_view({'delete': 'destroy'}), name="delete_all_todos"),
-    path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/', include(router.urls)),  # <-- Префикс API
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 ]

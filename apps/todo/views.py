@@ -1,51 +1,64 @@
-from rest_framework import viewsets, permissions, filters, status
-from rest_framework.response import Response
+from rest_framework import mixins, viewsets, permissions
+from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import User, Todo
-from .serializers import UserSerializer, TodoSerializer
+from django.contrib.auth import get_user_model
+from apps.todo.models import Todo
+from rest_framework.exceptions import PermissionDenied 
+from apps.todo.serializers import TodoSerializer, UserSerializer
 
+User = get_user_model()
 
-class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+class BaseMixin(viewsets.GenericViewSet,
+                mixins.ListModelMixin,
+                mixins.CreateModelMixin,
+                mixins.DestroyModelMixin,
+                mixins.UpdateModelMixin,
+                mixins.RetrieveModelMixin):
+    
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
 
-
-class TodoViewSet(viewsets.ModelViewSet):
+class TodoMixin(BaseMixin):
+    """Mixin для управления задачами"""
     queryset = Todo.objects.all()
     serializer_class = TodoSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['is_completed']
+    permission_classes = [permissions.IsAuthenticated]  # Ограничиваем доступ
+
     search_fields = ['title', 'description']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
 
     def get_queryset(self):
-        if self.request.user.is_authenticated:
-            return Todo.objects.filter(user=self.request.user)
-        return Todo.objects.none()
+        """Фильтруем задачи: обычный пользователь видит только свои"""
+        user = self.request.user
+        if user.is_staff:  # Админ видит всё
+            return Todo.objects.all()
+        return Todo.objects.filter(user=user)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        """Привязываем задачу к текущему пользователю, но даём возможность админам указывать ID"""
+        if self.request.user.is_staff and 'user' in self.request.data:
+            serializer.save()  # Админ может назначить пользователя
+        else:
+            serializer.save(user=self.request.user)  # Обычный юзер создаёт только для себя
 
-    def get_queryset(self):
-        return Todo.objects.filter(user=self.request.user)
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-
-    def destroy(self, request, pk=None):  # Удаление по ID
-        try:
-            todo = Todo.objects.get(id=pk, user=request.user)
-            todo.delete()
-            return Response({"message": "Задача удалена"}, status=status.HTTP_204_NO_CONTENT)
-        except Todo.DoesNotExist:
-            return Response({"error": "Задача не найдена"}, status=status.HTTP_404_NOT_FOUND)
+    def perform_destroy(self, instance):
+        """Обычные пользователи удаляют только свои задачи, админ может удалить любую"""
+        user = self.request.user
+        if user.is_staff or instance.user == user:
+            instance.delete()
+        else:
+            raise PermissionDenied("Вы не можете удалить эту задачу.")  # Теперь без ошибок! 🚀
 
 
-class DeleteAllTodosViewSet(viewsets.ViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+class UserMixin(BaseMixin):
+    """Mixin для управления пользователями"""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
 
-    def destroy(self, request):
-        Todo.objects.filter(user=request.user).delete()
-        return Response({"message": "Все задачи удалены"})
+    search_fields = ['username', 'phone_number']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
+
+
+
+
